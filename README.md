@@ -11,15 +11,15 @@ Autor: Kalmax dos Santos Sousa
 
 ## Arquitetura básica
 
-![Untitled](Documentac%CC%A7a%CC%83o%20da%20Implementac%CC%A7a%CC%83o%20Wordpress%20com%20Do%20301aaa7f2a8e42d9b4b3a5443fa8cf19/Untitled.png)
+<img src="/img/arq.png">
 
 ## Implementação
 
-### 1. VPC
+### VPC
 
 A VPC segue a seguinte estrutura:
 
-![Untitled](Documentac%CC%A7a%CC%83o%20da%20Implementac%CC%A7a%CC%83o%20Wordpress%20com%20Do%20301aaa7f2a8e42d9b4b3a5443fa8cf19/Untitled.jpeg)
+<img src="/img/vpc.jpg">
 
 A VPC possui 3 sub-redes: 
 
@@ -73,6 +73,133 @@ Para utilizar o Auto Scaling é necessário criar um modelo de execução de Ins
 
 É necessário acessar “EC2 no console AWS > Modelos de Execução > Criar modelo de execução”
 
+O modelo de execução possui a seguintes características:
+
+- Imagem: Amazon Linux 2
+- Tipo: t3.small
+- Armazenamento: 16 GiB gp2
+- Par de chaves criados anteriormente
+
+Também [e necessário Inserir as TAGs, vincular à VPC criada anteriormente (não incluir sub-rede no modelo) e definir um grupo de segurança
+
+**Grupo de Segurança EC2**
+
+| Tipo | Protocolo | Porta | Origem |
+| --- | --- | --- | --- |
+| HTTP | TCP | 80 | 0.0.0.0/0 |
+| HTTPS | TCP | 443 | 0.0.0.0/0 |
+| NFS | TCP | 2049 | 0.0.0.0/0 |
+| UDP Personalizada | UDP | 2049 | 0.0.0.0/0 |
+| MYSQL/Aurora | TCP | 3306 | 0.0.0.0/0 |
+
+A configuração das instâncias criadas e da aplicação Wordpress é feita através arquivo `user_data.sh` abaixo:
+
+```bash
+#!/bin/bash
+
+##Instalação do Docker
+sudo yum update -y
+sudo amazon-linux-extras install docker -y
+sudo service docker start
+sudo systemctl enable docker.service
+sudo usermod -a -G docker ec2-user
+
+curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+
+##Instalação do EFS
+sudo yum install -y amazon-efs-utils
+sudo mkdir /efs
+sudo chmod 777 /efs/
+sudo mount -t efs -o tls fs-09fe1ec767bc01f72:/ /efs
+
+echo "fs-09fe1ec767bc01f72:/ /efs efs _netdev,noresvport,tls,iam 0 0" >> /etc/fstab
+
+export WORDPRESS_DB_USER=admin
+export WORDPRESS_DB_PASSWORD=wordpress
+
+mkdir /myapp
+
+##Criação do Docker-Compose para Wordpress
+cat << EOF > /myapp/docker-compose.yml
+version: '3.1'
+
+services:
+
+  wordpress:
+    image: wordpress
+    restart: always
+    ports:
+      - 80:80
+    environment:
+      WORDPRESS_DB_HOST: wordpress.c1k5hjsnsxov.us-east-1.rds.amazonaws.com:3306
+      WORDPRESS_DB_USER: $WORDPRESS_DB_USER
+      WORDPRESS_DB_PASSWORD: $WORDPRESS_DB_PASSWORD
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - /efs/wordpress:/var/www/html
+
+  db:
+    image: mysql:5.7
+    restart: always
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: wordpress
+      MYSQL_RANDOM_ROOT_PASSWORD: '1'
+    volumes:
+      - db:/var/lib/mysql
+
+volumes:
+  wordpress:
+  db:
+EOF
+
+cd /myapp
+
+docker-compose up -d
+cd ..
+```
+
 ### Auto Scaling
 
+Com o modelo de execução, para a configuração do Auto Scaling é necessário informar:
+
+- Nome
+- Modelo de execução e sua versão
+- VPC e as sub-redes de disponibilidade (apenas as sub-redes privadas)
+- Definir os detalhes do grupo
+    - Mínimo: 2
+    - Desejado: 2
+    - Máximo: 4
+
+### Target Group
+
+Para configurar o Target Group é necessário:
+
+- Inserir um nome
+- Selecionar:
+    - Tipo de destino “Instâncias”
+    - Protocolo: HTTP
+    - Porta: 80
+    - Tipo de endereço IP: IPv4
+    - VPC criada anteriormente
+    - Versão do protocolo: HTTP1
+- É necessário registrar as Instâncias de destino.
+
 ### Load Balance
+
+Para criar o Load Balance, basta acessar “O menu EC2 no console AWS > Load balancers > Criar load balancer” e seguir as seguintes configurações:
+
+- Tipo: Application Load Balancer
+- Esquema: Voltado para a Internet
+- Tipo de endereço IP: IPv4
+- Listener: Protocolo HTTP : Porta 80 - Avançar para: Selecionar o Target Group criado
+
+Também é necessário indicar um nome, associar á VPC e definir um grupo de segurança
+
+**Grupo de Segurança Load Balance**
+
+| Tipo | Protocolo | Porta | Origem |
+| --- | --- | --- | --- |
+| HTTP | TCP | 80 | 0.0.0.0/0 |
