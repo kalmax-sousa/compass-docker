@@ -9,13 +9,6 @@ sudo usermod -a -G docker ec2-user
 curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 chmod +x /usr/local/bin/docker-compose
 
-sudo yum install -y amazon-efs-utils
-sudo mkdir /efs
-sudo chmod 777 /efs/
-sudo mount -t efs -o tls fs-09fe1ec767bc01f72:/ /efs
-
-echo "fs-09fe1ec767bc01f72:/ /efs efs _netdev,noresvport,tls,iam 0 0" >> /etc/fstab
-
 export WORDPRESS_DB_USER=admin
 export WORDPRESS_DB_PASSWORD=wordpress
 
@@ -59,3 +52,9 @@ cd /myapp
 
 docker-compose up -d
 cd ..
+
+sudo yum install -y amazon-efs-utils
+sudo mkdir /efs
+sudo mount -t efs -o tls fs-09fe1ec767bc01f72:/ /efs
+
+echo "fs-09fe1ec767bc01f72:/ /efs efs _netdev,noresvport,tls,iam 0 0" >> /etc/fstab
